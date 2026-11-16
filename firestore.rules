@@ -1,0 +1,45 @@
+rules_version = '2';
+
+// Regras de segurança do Checkpoint Intensivo.
+// O app NÃO é a última linha de defesa: mesmo que alguém altere o APK,
+// o servidor só aceita o que estas regras permitem.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Cada usuário só enxerga a própria pasta: users/{uid}/visitas/{id}
+    match /users/{uid}/visitas/{visitaId} {
+
+      function dono() {
+        return request.auth != null && request.auth.uid == uid;
+      }
+
+      function visitaValida() {
+        let d = request.resource.data;
+        return d.keys().hasOnly(['id', 'titulo', 'cliente', 'endereco', 'status',
+                                 'agendadaPara', 'observacoes', 'criadaEm',
+                                 'atualizadaEm', 'excluida', 'servidorEm'])
+          && d.id == visitaId
+          && d.titulo is string && d.titulo.size() > 0 && d.titulo.size() <= 120
+          && d.cliente is string && d.cliente.size() > 0 && d.cliente.size() <= 120
+          && d.endereco is string && d.endereco.size() > 0 && d.endereco.size() <= 200
+          && d.status in ['agendada', 'em_andamento', 'concluida']
+          && d.agendadaPara is int
+          && d.criadaEm is int
+          && d.atualizadaEm is int
+          && d.excluida is bool
+          // o carimbo de tempo do servidor não pode ser forjado pelo cliente
+          && d.servidorEm == request.time;
+      }
+
+      allow read: if dono();
+      allow create, update: if dono() && visitaValida();
+      // exclusão é lógica (excluida = true), para propagar a outros aparelhos
+      allow delete: if false;
+    }
+
+    // todo o resto: fechado
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
