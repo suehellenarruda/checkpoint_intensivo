@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../domain/models/status_visita.dart';
 import '../../domain/models/visita.dart';
 import '../visita_form/visita_form_page.dart';
+import '../widgets/barra_sincronizacao.dart';
 import 'visitas_view_model.dart';
 
 class VisitasPage extends StatefulWidget {
@@ -45,7 +46,10 @@ class _VisitasPageState extends State<VisitasPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Excluir visita?'),
-        content: Text('"${v.titulo}" será removida deste aparelho.'),
+        content: Text(
+          '"${v.titulo}" será removida deste aparelho e do '
+          'servidor na próxima sincronização.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -69,6 +73,11 @@ class _VisitasPageState extends State<VisitasPage> {
       appBar: AppBar(
         title: const Text('Minhas visitas'),
         actions: [
+          IconButton(
+            tooltip: 'Sincronizar agora',
+            icon: const Icon(Icons.sync),
+            onPressed: vm.sincronizarAgora,
+          ),
           PopupMenuButton<String>(
             onSelected: (_) => widget.aoSair(),
             itemBuilder: (_) => [
@@ -91,7 +100,12 @@ class _VisitasPageState extends State<VisitasPage> {
           ),
         ],
       ),
-      body: _corpo(vm),
+      body: Column(
+        children: [
+          const BarraSincronizacao(),
+          Expanded(child: _corpo(vm)),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         key: const Key('botao-nova'),
         onPressed: () => _abrirForm(),
@@ -109,7 +123,7 @@ class _VisitasPageState extends State<VisitasPage> {
       return Center(child: Text(vm.erro!));
     }
     return RefreshIndicator(
-      onRefresh: vm.carregar,
+      onRefresh: vm.sincronizarAgora,
       child: vm.visitas.isEmpty
           ? ListView(
               // ListView para o "puxar para atualizar" funcionar vazio
@@ -178,7 +192,6 @@ class _ItemVisita extends StatelessWidget {
       trailing: visita.sincronizada
           ? null
           : Tooltip(
-              // Encontro 01: tudo fica pendente; quem envia é o Encontro 02
               message: 'Pendente de envio',
               child: Icon(Icons.cloud_upload_outlined, color: cs.outline),
             ),

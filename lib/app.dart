@@ -1,10 +1,12 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'data/auth/auth_service.dart';
 import 'data/sessao.dart';
+import 'data/sync/sincronizador.dart';
 import 'domain/models/usuario.dart';
 import 'ui/login/login_page.dart';
 import 'ui/login/login_view_model.dart';
@@ -12,9 +14,10 @@ import 'ui/visitas/visitas_page.dart';
 import 'ui/visitas/visitas_view_model.dart';
 
 class CheckpointApp extends StatelessWidget {
-  const CheckpointApp({super.key, required this.auth});
+  const CheckpointApp({super.key, required this.auth, required this.firestore});
 
   final AuthService auth;
+  final FirebaseFirestore firestore;
 
   @override
   Widget build(BuildContext context) {
@@ -27,7 +30,7 @@ class CheckpointApp extends StatelessWidget {
         colorSchemeSeed: semente,
         brightness: Brightness.dark,
       ),
-      home: AuthGate(auth: auth),
+      home: AuthGate(auth: auth, firestore: firestore),
     );
   }
 }
@@ -38,9 +41,10 @@ class CheckpointApp extends StatelessWidget {
 /// a sessão mudou → o porteiro troca a árvore. Isso fecha a porta para
 /// o clássico bug do "botão voltar leva de novo para a tela logada".
 class AuthGate extends StatefulWidget {
-  const AuthGate({super.key, required this.auth});
+  const AuthGate({super.key, required this.auth, required this.firestore});
 
   final AuthService auth;
+  final FirebaseFirestore firestore;
 
   @override
   State<AuthGate> createState() => _AuthGateState();
@@ -75,7 +79,7 @@ class _AuthGateState extends State<AuthGate> {
     }
 
     if (u == null) return;
-    final nova = await Sessao.abrir(u);
+    final nova = await Sessao.abrir(u, firestore: widget.firestore);
     if (!mounted || _usuario?.uid != u.uid) {
       await nova.encerrar(apagarDados: false);
       return;
@@ -85,9 +89,40 @@ class _AuthGateState extends State<AuthGate> {
     unawaited(widget.auth.revalidarSessao());
   }
 
-  /// Encontro 01: sair = signOut. O listener acima encerra a sessão e
-  /// apaga o banco. No Encontro 02 entra o aviso de "visitas não enviadas".
-  Future<void> _sair() => widget.auth.sair();
+  Future<void> _sair() async {
+    final sessao = _sessao;
+    if (sessao == null) return;
+    final sync = sessao.sincronizador;
+
+    // Última chance de subir o que está pendente.
+    if (sync.pendentes > 0) await sync.sincronizar();
+
+    if (sync.pendentes > 0 && mounted) {
+      final confirmou = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          icon: const Icon(Icons.warning_amber),
+          title: const Text('Há visitas não enviadas'),
+          content: Text(
+            '${sync.pendentes} visita(s) ainda não chegaram ao '
+            'servidor. Se sair agora, elas serão APAGADAS deste aparelho.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Ficar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Sair e apagar'),
+            ),
+          ],
+        ),
+      );
+      if (confirmou != true) return;
+    }
+    await widget.auth.sair(); // o listener cuida de encerrar a sessão
+  }
 
   @override
   void dispose() {
@@ -111,9 +146,17 @@ class _AuthGateState extends State<AuthGate> {
     final sessao = _sessao;
     if (sessao == null) return const _Carregando();
 
-    return ChangeNotifierProvider(
+    return MultiProvider(
       key: ValueKey(usuario.uid),
-      create: (_) => VisitasViewModel(sessao.repositorio),
+      providers: [
+        ChangeNotifierProvider<Sincronizador>.value(
+          value: sessao.sincronizador,
+        ),
+        ChangeNotifierProvider(
+          create: (_) =>
+              VisitasViewModel(sessao.repositorio, sessao.sincronizador),
+        ),
+      ],
       child: VisitasPage(email: usuario.email, aoSair: _sair),
     );
   }

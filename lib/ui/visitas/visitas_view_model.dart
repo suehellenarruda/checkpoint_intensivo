@@ -1,14 +1,20 @@
 import 'package:flutter/foundation.dart';
 
 import '../../data/repositories/visita_repository.dart';
+import '../../data/sync/sincronizador.dart';
 import '../../domain/models/status_visita.dart';
 import '../../domain/models/visita.dart';
 
-/// Estado da lista. Fala SÓ com o repositório — nunca com o sqflite.
 class VisitasViewModel extends ChangeNotifier {
-  VisitasViewModel(this._repo);
+  VisitasViewModel(this._repo, this._sync) {
+    _versaoVista = _sync.versaoDados;
+    // Quando o sincronizador traz dados novos do servidor, recarrega.
+    _sync.addListener(_aoMudarSync);
+  }
 
   final VisitaRepository _repo;
+  final Sincronizador _sync;
+  int _versaoVista = 0;
 
   List<Visita> visitas = const [];
   bool carregando = true;
@@ -56,5 +62,27 @@ class VisitasViewModel extends ChangeNotifier {
     notifyListeners();
     await _repo.excluir(v);
     await carregar();
+  }
+
+  /// Puxar para atualizar: força uma rodada de sincronização.
+  Future<void> sincronizarAgora() async {
+    await _sync.sincronizar();
+    await carregar();
+  }
+
+  void _aoMudarSync() {
+    if (_sync.versaoDados != _versaoVista) {
+      _versaoVista = _sync.versaoDados;
+      carregar();
+    } else {
+      // pendentes podem ter mudado (ícone de nuvem nos itens)
+      if (_sync.estado == EstadoSync.ocioso) carregar();
+    }
+  }
+
+  @override
+  void dispose() {
+    _sync.removeListener(_aoMudarSync);
+    super.dispose();
   }
 }

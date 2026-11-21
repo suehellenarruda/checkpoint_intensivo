@@ -58,3 +58,4 @@ key.properties
 .env
 # logs do Firebase Emulator
 *-debug.log
+firestore-debug.log
